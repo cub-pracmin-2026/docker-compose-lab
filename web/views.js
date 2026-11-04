@@ -74,12 +74,22 @@ export function searchPage(query, tags, problems) {
   </table>`);
 }
 
-export function problemPage(p) {
+export function problemPage(p, similar) {
+  const rows = similar.map(
+    (s) => html`<tr>
+      <td><a href="/problem/${s.id}">${s.id}</a></td>
+      <td>${s.name}</td>
+      <td>${s.rating ?? html`<span class="muted">none</span>`}</td>
+      <td>${tagLinks(s.tags)}</td>
+    </tr>`,
+  );
   return layout(`${p.id}. ${p.name}`, html`
   <h1>${p.id}. ${p.name}</h1>
   <p>Rating: ${p.rating ?? "none"} · Solved by ${p.solved_count} people</p>
   <p>${tagLinks(p.tags)}</p>
-  <p><a href="${p.url}">Open on Codeforces</a></p>`);
+  <p><a href="${p.url}">Open on Codeforces</a></p>
+  <h2>Similar problems</h2>
+  <table>${rows}</table>`);
 }
 
 export function errorPage(message) {

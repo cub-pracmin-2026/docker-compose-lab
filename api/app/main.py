@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 
-from . import db, importer, problems, progress, store
+from . import db, importer, problems, progress, similar, store
 
 data_ready = threading.Event()
 web_seen = threading.Event()  # a request from the web part: it sends the header X-Client
@@ -13,6 +13,7 @@ web_seen = threading.Event()  # a request from the web part: it sends the header
 def prepare_data():
     with db.connect() as conn:
         importer.import_if_empty(conn)
+        similar.add_vectors(conn)
     data_ready.set()
 
 
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
     # Connect before the server starts: without the database the API exits with an error.
     with db.connect() as conn:
         importer.create_schema(conn)
+        similar.enable_pgvector(conn)
     threading.Thread(target=prepare_data, daemon=True).start()
     progress.start(checks(app))
     yield
@@ -32,11 +34,14 @@ def checks(app: FastAPI) -> dict[str, progress.Check]:
         "02-secret": db.password_from_secret,
         "02-restart": importer.survived_restart,
         "03-web": web_seen.is_set,
+        "04-pgvector": lambda: data_ready.is_set() and similar.vectors_ready(),
+        "04-kept": similar.data_kept,
     }
 
 
 app = FastAPI(title="CF Finder", lifespan=lifespan)
 app.include_router(problems.router)
+app.include_router(similar.router)
 
 
 @app.middleware("http")

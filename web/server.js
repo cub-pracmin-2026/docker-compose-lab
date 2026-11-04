@@ -35,8 +35,9 @@ app.get("/", async (req, res, next) => {
 
 app.get("/problem/:id", async (req, res, next) => {
   try {
-    const problem = await api(`/problems/${encodeURIComponent(req.params.id)}`);
-    res.send(problemPage(problem));
+    const id = encodeURIComponent(req.params.id);
+    const [problem, similar] = await Promise.all([api(`/problems/${id}`), api(`/problems/${id}/similar`)]);
+    res.send(problemPage(problem, similar));
   } catch (e) {
     next(e);
   }
