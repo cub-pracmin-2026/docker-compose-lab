@@ -1,13 +1,8 @@
-"""The problems in memory: the API reads them from the snapshot on each start."""
-from collections import Counter
-from datetime import datetime, timezone
-
-from . import snapshot
+"""The problems in Postgres."""
+from . import db, importer
 
 PAGE_SIZE = 50
-
-problems: dict[str, dict] = {}
-loaded_at: datetime | None = None
+COLUMNS = "id, contest_id, problem_index, name, rating, tags, solved_count"
 
 
 def with_url(problem: dict) -> dict:
@@ -15,39 +10,40 @@ def with_url(problem: dict) -> dict:
     return problem | {"url": url}
 
 
-def load() -> None:
-    global loaded_at
-    problems.clear()
-    problems.update((p["id"], p) for p in snapshot.read_problems())
-    loaded_at = datetime.now(timezone.utc)
-    print(f"Loaded {len(problems)} problems into memory", flush=True)
-
-
-def matches(p: dict, q: str | None, tag: str | None, min_rating: int | None, max_rating: int | None) -> bool:
-    # A problem with no rating does not match a rating filter.
-    return (
-        (not q or q.lower() in p["name"].lower())
-        and (not tag or tag in p["tags"])
-        and (min_rating is None or (p["rating"] is not None and p["rating"] >= min_rating))
-        and (max_rating is None or (p["rating"] is not None and p["rating"] <= max_rating))
-    )
-
-
 def search(q: str | None, tag: str | None, min_rating: int | None, max_rating: int | None) -> list[dict]:
-    found = [p for p in problems.values() if matches(p, q, tag, min_rating, max_rating)]
-    found.sort(key=lambda p: (p["contest_id"], p["problem_index"]), reverse=True)
-    return [with_url(p) for p in found[:PAGE_SIZE]]
+    conditions = ["TRUE"]
+    if q:
+        conditions.append("strpos(lower(name), lower(%(q)s)) > 0")
+    if tag:
+        conditions.append("%(tag)s = ANY(tags)")
+    if min_rating is not None:
+        conditions.append("rating >= %(min_rating)s")
+    if max_rating is not None:
+        conditions.append("rating <= %(max_rating)s")
+    sql = (
+        f"SELECT {COLUMNS} FROM problems WHERE {' AND '.join(conditions)}"
+        f" ORDER BY contest_id DESC, problem_index DESC LIMIT {PAGE_SIZE}"
+    )
+    params = {"q": q, "tag": tag, "min_rating": min_rating, "max_rating": max_rating}
+    with db.connect() as conn:
+        return [with_url(p) for p in conn.execute(sql, params)]
 
 
 def get(problem_id: str) -> dict | None:
-    problem = problems.get(problem_id)
+    with db.connect() as conn:
+        problem = conn.execute(f"SELECT {COLUMNS} FROM problems WHERE id = %s", [problem_id]).fetchone()
     return with_url(problem) if problem else None
 
 
 def tags() -> list[dict]:
-    counts = Counter(t for p in problems.values() for t in p["tags"])
-    return [{"tag": t, "count": n} for t, n in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
+    with db.connect() as conn:
+        return conn.execute(
+            "SELECT tag, count(*) AS count FROM problems, unnest(tags) AS tag"
+            " GROUP BY tag ORDER BY count DESC, tag"
+        ).fetchall()
 
 
 def stats() -> dict:
-    return {"count": len(problems), "imported_at": loaded_at}
+    with db.connect() as conn:
+        count = conn.execute("SELECT count(*) AS n FROM problems").fetchone()["n"]
+        return {"count": count, "imported_at": importer.imported_at(conn)}
