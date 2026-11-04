@@ -3,48 +3,30 @@
 A search over the Codeforces problem set. You are going to set up Docker Compose for this app, one branch at a
 time: `01-api`, `02-db`, `03-web`, `04-similar`. The `README.md` of each branch has the task of this branch.
 
-## Task 02
+## Task 03
 
-Switch to the branch `02-db` and merge `01-api` into it.
+Switch to the branch `03-web` and merge `02-db` into it.
 
-In this branch, the API keeps the problems in Postgres: on the first start, it imports them into the database.
+This branch adds the third service: the web app in `web/`.
 
-Your goal: add the database to `compose.yaml` and keep its data.
+Your goal: run all three services with one command, and keep the data of the running app of `02-db`.
 
 Do these steps in order:
 
-1. Add the service `db` (Postgres 18) to `compose.yaml`: see [`db`](#db). Give `api` the env variables that it
-   needs: see [`api`](#api). For now, you can put the password into `environment`: step 4 moves it out.
+1. Write `web/Dockerfile`.
+2. Add the service `web` to `compose.yaml`. Publish port 3000. Give it the env variables that [`web`](#web) lists.
+   Then update the running app of `02-db` with `docker compose up -d --build`.
 
-   **Check:** `docker compose up --build`. The log of `api` shows the import, then search works in API Docs.
-   If `api` stops because `db` is not ready yet, run `up` again: step 3 fixes this.
-2. Keep the data of `db` in a volume, so that the API does not import the problems again after
-   a restart.
+   **Check:** http://localhost:3000/?q=tree shows search results. If it shows an error, read
+   `docker compose logs web`. `GET /stats` shows the same `imported_at` as in `02-db`.
+3. Commit your changes and push the branch `03-web`.
 
-   **Check:** note `imported_at` in `GET /stats`. Run `docker compose down`, then `docker compose up`:
-   `imported_at` is the same.
-3. `api` must start only when `db` is ready: a healthcheck in `db` and `service_healthy`
-   in `api`. See [Control startup order](https://docs.docker.com/compose/how-tos/startup-order/).
-
-   **Check:** `docker compose ps` shows `db` as `healthy`. After `docker compose down -v` and `up --build`, `api`
-   starts on the first try.
-4. Keep the password out of git: write it into a file, for example `db_password.txt`, and add
-   this file to `.gitignore`. Give the password from this file to `db` and `api` as one top-level secret, and
-   remove it from `environment`. See [Manage secrets](https://docs.docker.com/compose/how-tos/use-secrets/).
-
-   **Check:** `git status` does not show the password file. The app starts, and search works. Postgres keeps the
-   password of its first start in the volume: if you changed the password, run `docker compose down -v` once.
-5. Commit your changes and push the branch `02-db`.
-
-   **Check:** on GitHub, the branch `02-db` has your commit.
+   **Check:** on GitHub, the branch `03-web` has your commit.
 
 **Done when:**
 
-1. In a fresh clone with the password file, `docker compose up --build --wait` starts the app. Search works at
-   http://localhost:8000/docs.
-2. After `docker compose down` and `up`, `/stats` shows the same import time.
-3. `api` waits for `db` to be healthy.
-4. No password in git or in `environment`.
+1. http://localhost:3000 shows search results.
+2. `/stats` shows the same import time as in `02-db`.
 
 ## How the app works
 
@@ -52,6 +34,7 @@ Do these steps in order:
 |---|---|---|---|
 | `db` | — | Postgres 18 | 5432 |
 | `api` | `api/` | Python 3.12, FastAPI, psycopg 3 | 8000 |
+| `web` | `web/` | Node 22, Express | 3000 |
 
 ### `db`
 
@@ -101,4 +84,26 @@ Run from the folder `api/`:
 ```bash
 pip install -r requirements.txt   # install the libraries that requirements.txt lists
 fastapi run app/main.py           # start the API; it listens on 0.0.0.0:8000
+```
+
+### `web`
+
+Pages rendered on the server: a search form with results, and a page for each problem with a link to
+Codeforces. The web app gets all data from the API. Open http://localhost:3000.
+
+Env variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `API_URL` | `http://localhost:8000` | The address of the API, as seen from the web app |
+
+The web app is written in JavaScript. It runs on [Node.js](https://nodejs.org/): a program that runs JavaScript
+outside the browser, as `python` runs Python code. Node.js comes with `npm`, its package manager, as Python comes
+with `pip`. `package.json` lists the libraries of the app, and `package-lock.json` fixes their exact versions.
+
+Run from the folder `web/`:
+
+```bash
+npm ci           # install the exact versions from package-lock.json into node_modules/
+node server.js   # start the web app; it listens on port 3000
 ```

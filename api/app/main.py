@@ -2,11 +2,12 @@
 import threading
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 
 from . import db, importer, problems, progress, store
 
 data_ready = threading.Event()
+web_seen = threading.Event()  # a request from the web part: it sends the header X-Client
 
 
 def prepare_data():
@@ -30,11 +31,19 @@ def checks(app: FastAPI) -> dict[str, progress.Check]:
         "02-postgres": data_ready.is_set,
         "02-secret": db.password_from_secret,
         "02-restart": importer.survived_restart,
+        "03-web": web_seen.is_set,
     }
 
 
 app = FastAPI(title="CF Finder", lifespan=lifespan)
 app.include_router(problems.router)
+
+
+@app.middleware("http")
+async def notice_web(request: Request, call_next):
+    if request.headers.get("x-client") == "cf-finder-web":
+        web_seen.set()
+    return await call_next(request)
 
 
 @app.get("/health")
